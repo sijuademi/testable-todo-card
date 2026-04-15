@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Todo App</title>
+		<link rel="stylesheet" href="style.css" />
+	</head>
+	<body>
+		<main class="app" role="main">
+			<div class="app-header">
+				<h1 class="app-title">My tasks</h1>
+				<span class="count-badge" id="count-badge">0 tasks</span>
+			</div>
+
+			<section class="add-form" role="region" aria-label="Add new task">
+				<div class="field">
+					<label for="f-title"
+						>Task title
+						<span class="task-asterisk" aria-hidden="true">*</span></label
+					>
+					<input
+						id="f-title"
+						type="text"
+						placeholder="What needs to be done?"
+						maxlength="120"
+						aria-required="true"
+						aria-describedby="title-hint"
+					/>
+					<span id="title-hint" class="required-field">Required field</span>
+				</div>
+
+				<div class="field description">
+					<label for="f-desc">Description</label>
+					<textarea
+						id="f-desc"
+						placeholder="Add notes or details..."
+						maxlength="400"
+					></textarea>
+				</div>
+
+				<div class="form-row">
+					<div class="field">
+						<label for="f-priority">Priority</label>
+						<select id="f-priority">
+							<option value="Medium">Medium</option>
+							<option value="High">High</option>
+							<option value="Low">Low</option>
+						</select>
+					</div>
+					<div class="field">
+						<label for="f-status">Status</label>
+						<select id="f-status">
+							<option value="Pending">Pending</option>
+							<option value="In Progress">In Progress</option>
+						</select>
+					</div>
+				</div>
+
+				<div class="form-row">
+					<div class="field">
+						<label for="f-due">Due date</label>
+						<input id="f-due" type="date" />
+					</div>
+					<div class="field">
+						<label>Tags</label>
+						<div
+							class="tags-input"
+							id="tags-input-wrap"
+							role="group"
+							aria-label="Tags — type a tag and press Enter"
+							onclick="document.getElementById('f-tag-input').focus()"
+						>
+							<div id="tag-chips"></div>
+							<input
+								id="f-tag-input"
+								type="text"
+								placeholder="Type tag, press Enter"
+								maxlength="30"
+								aria-label="Add tag — press Enter to confirm"
+							/>
+						</div>
+					</div>
+				</div>
+
+				<div class="form-actions">
+					<button class="btn" onclick="resetForm()" type="button">Clear</button>
+					<button
+						class="btn btn-primary"
+						id="add-btn"
+						onclick="addTask()"
+						type="button"
+						disabled
+					>
+						Add task
+					</button>
+				</div>
+			</section>
+
+			<div
+				id="task-list"
+				class="task-list"
+				role="list"
+				aria-label="Task list"
+				aria-live="polite"
+				aria-relevant="additions removals"
+			></div>
+		</main>
+
+		<script src="script.js"></script>
+	</body>
+</html>
