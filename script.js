@@ -1,304 +1,335 @@
-"use-strict";
+"use strict";
 
+const DESCRIPTION_COLLAPSE_THRESHOLD = 120;
+const TIME_REFRESH_INTERVAL_MS = 30000;
+
+// Seed data for the single card requirement
 let tasks = [
 	{
 		id: 1,
-		title: "Testable Todo Item Card",
-		desc: "Build a clean, modern Todo / Task Card component (or a small page containing one card)",
+		title: "Complete Stage 1 Integration",
+		desc: "Ensure all test-ids are present, the priority bar changes color, and the status dropdown syncs perfectly with the checkbox. This description is long enough to trigger the expand/collapse behavior to ensure accessibility requirements are met.",
 		priority: "High",
 		status: "In Progress",
-		due: "2026-04-16",
-		tags: ["Work", "Urgent", "Task"],
+		due: new Date(Date.now() + 86400000).toISOString().split("T")[0], // Due tomorrow
+		tags: ["Work", "Stage 1"],
 		done: false,
-	},
-	{
-		id: 2,
-		title: "Write Q2 retrospective",
-		desc: "Summarise wins, blockers, and action items for the engineering team.",
-		priority: "Medium",
-		status: "Pending",
-		due: "2026-04-20",
-		tags: ["Work"],
-		done: false,
+		expanded: false,
 	},
 ];
-let nextId = 3;
-let pendingTags = [];
 
-const titleEl = document.getElementById("f-title");
-const addBtn = document.getElementById("add-btn");
-const tagInput = document.getElementById("f-tag-input");
-const tagChips = document.getElementById("tag-chips");
+let currentlyEditingTaskId = null;
+let currentFilter = "all";
 
-titleEl.addEventListener("input", () => {
-	addBtn.disabled = titleEl.value.trim() === "";
-});
+/* ============================================================
+   STATUS & LOGIC RULES
+   ============================================================ */
 
-titleEl.addEventListener("keydown", (e) => {
-	if (e.key === "Enter") addTask();
-});
+function setActiveFilter(filter, element) {
+	currentFilter = filter;
+	// Update active button state
+	document.querySelectorAll(".filter-button").forEach((btn) => {
+		btn.classList.remove("filter-button--active");
+	});
+	element.classList.add("filter-button--active");
+	renderTaskList();
+}
 
-tagInput.addEventListener("keydown", (e) => {
-	if (e.key === "Enter" || e.key === ",") {
-		e.preventDefault();
-		const val = tagInput.value.trim().replace(/,/g, "");
-		if (val && !pendingTags.includes(val) && pendingTags.length < 5) {
-			pendingTags.push(val);
-			renderPendingTags();
-			tagInput.value = "";
+function toggleTaskCompletion(taskId, isChecked) {
+	const task = tasks.find((t) => t.id === taskId);
+	if (!task) return;
+	task.done = isChecked;
+	// RULE: If checkbox toggled -> status becomes "Done"
+	// RULE: If unchecked after "Done" -> revert to "Pending"
+	task.status = isChecked ? "Done" : "Pending";
+	renderTaskList();
+}
+
+function updateTaskStatus(taskId, newStatus) {
+	const task = tasks.find((t) => t.id === taskId);
+	if (!task) return;
+	task.status = newStatus;
+	// RULE: If status manually set to "Done" -> checkbox becomes checked
+	task.done = newStatus === "Done";
+	renderTaskList();
+}
+
+/* ============================================================
+   EDIT MODE & FOCUS TRAP
+   ============================================================ */
+
+function openEditForm(taskId) {
+	currentlyEditingTaskId = taskId;
+	renderTaskList();
+	// Move focus to first input
+	setTimeout(() => {
+		const input = document.getElementById(`edit-input-title-${taskId}`);
+		if (input) input.focus();
+	}, 0);
+}
+
+function saveTaskEdits(taskId) {
+	const task = tasks.find((t) => t.id === taskId);
+	const newTitle = document
+		.getElementById(`edit-input-title-${taskId}`)
+		.value.trim();
+
+	if (!newTitle) return;
+
+	task.title = newTitle;
+	task.desc = document.getElementById(`edit-input-description-${taskId}`).value;
+	task.priority = document.getElementById(
+		`edit-input-priority-${taskId}`,
+	).value;
+	task.due =
+		document.getElementById(`edit-input-due-date-${taskId}`).value || null;
+
+	currentlyEditingTaskId = null;
+	renderTaskList();
+}
+
+function deleteTask(taskId) {
+	tasks = tasks.filter((t) => t.id !== taskId);
+	currentlyEditingTaskId = null;
+	renderTaskList();
+}
+
+function cancelTaskEdit() {
+	currentlyEditingTaskId = null;
+	renderTaskList();
+}
+
+// Focus Trap and Escape Key Handler
+document.addEventListener("keydown", (e) => {
+	if (currentlyEditingTaskId === null) return;
+
+	if (e.key === "Escape") cancelTaskEdit();
+
+	if (e.key === "Tab") {
+		const form = document.querySelector('[data-testid="test-todo-edit-form"]');
+		const focusables = form.querySelectorAll("input, textarea, select, button");
+		const first = focusables[0];
+		const last = focusables[focusables.length - 1];
+
+		if (e.shiftKey && document.activeElement === first) {
+			e.preventDefault();
+			last.focus();
+		} else if (!e.shiftKey && document.activeElement === last) {
+			e.preventDefault();
+			first.focus();
 		}
 	}
-	if (e.key === "Backspace" && tagInput.value === "" && pendingTags.length) {
-		pendingTags.pop();
-		renderPendingTags();
-	}
 });
 
-function renderPendingTags() {
-	tagChips.innerHTML = "";
-	pendingTags.forEach((tag, i) => {
-		const chip = document.createElement("span");
-		chip.className = "tag-chip";
-		chip.innerHTML = `${escHtml(tag)}<button type="button" aria-label="Remove tag ${escHtml(tag)}" onclick="removeTag(${i})"><svg viewBox="0 0 12 12" width="10" height="10" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round"><line x1="2" y1="2" x2="10" y2="10"/><line x1="10" y1="2" x2="2" y2="10"/></svg></button>`;
-		tagChips.appendChild(chip);
-	});
-}
+/* ============================================================
+   TIME CALCULATIONS
+   ============================================================ */
 
-function removeTag(i) {
-	pendingTags.splice(i, 1);
-	renderPendingTags();
-}
+function getTimeRemainingInfo(isoDateString, isTaskDone) {
+	if (isTaskDone)
+		return { text: "Completed", cssClass: "meta-item--done", isOverdue: false };
+	if (!isoDateString) return null;
 
-function addTask() {
-	const title = titleEl.value.trim();
-	if (!title) return;
-	tasks.unshift({
-		id: nextId++,
-		title,
-		desc: document.getElementById("f-desc").value.trim(),
-		priority: document.getElementById("f-priority").value,
-		status: document.getElementById("f-status").value,
-		due: document.getElementById("f-due").value || null,
-		tags: [...pendingTags],
-		done: false,
-	});
-	resetForm();
-	renderTasks();
-}
+	const dueDate = new Date(isoDateString + "T23:59:00");
+	const diff = dueDate - Date.now();
+	const absDiff = Math.abs(diff);
 
-function resetForm() {
-	titleEl.value = "";
-	document.getElementById("f-desc").value = "";
-	document.getElementById("f-priority").value = "Medium";
-	document.getElementById("f-status").value = "Pending";
-	document.getElementById("f-due").value = "";
-	pendingTags = [];
-	renderPendingTags();
-	addBtn.disabled = true;
-	titleEl.focus();
-}
+	const mins = Math.floor(absDiff / 60000);
+	const hours = Math.floor(absDiff / 3600000);
+	const days = Math.floor(absDiff / 86400000);
 
-function toggleDone(id) {
-	const t = tasks.find((x) => x.id === id);
-	if (!t) return;
-	t.done = !t.done;
-	t.status = t.done ? "Done" : "Pending";
-	renderTasks();
-}
-
-function deleteTask(id) {
-	if (!confirm("Delete this task?")) return;
-	tasks = tasks.filter((x) => x.id !== id);
-	renderTasks();
-}
-
-function friendlyTime(dateStr) {
-	if (!dateStr) return null;
-	const due = new Date(dateStr + "T23:59:00");
-	const diff = due - Date.now();
-	const abs = Math.abs(diff);
-	const days = Math.round(abs / 86400000);
-	const hrs = Math.round(abs / 3600000);
-	const mins = Math.round(abs / 60000);
-	if (diff < 0) {
-		if (mins < 60)
-			return {
-				text: `Overdue by ${mins} min${mins !== 1 ? "s" : ""}`,
-				cls: "overdue",
-			};
-		if (hrs < 24)
-			return {
-				text: `Overdue by ${hrs} hour${hrs !== 1 ? "s" : ""}`,
-				cls: "overdue",
-			};
+	if (diff > 0) {
+		let timeStr =
+			days > 0
+				? `${days} day${days > 1 ? "s" : ""}`
+				: hours > 0
+					? `${hours} hour${hours > 1 ? "s" : ""}`
+					: `${mins} minute${mins > 1 ? "s" : ""}`;
 		return {
-			text: `Overdue by ${days} day${days !== 1 ? "s" : ""}`,
-			cls: "overdue",
+			text: `Due in ${timeStr}`,
+			cssClass: "meta-item--soon",
+			isOverdue: false,
+		};
+	} else {
+		let timeStr =
+			days > 0
+				? `${days} day${days > 1 ? "s" : ""}`
+				: hours > 0
+					? `${hours} hour${hours > 1 ? "s" : ""}`
+					: `${mins} minute${mins > 1 ? "s" : ""}`;
+		return {
+			text: `Overdue by ${timeStr}`,
+			cssClass: "meta-item--overdue",
+			isOverdue: true,
 		};
 	}
-	if (days === 0) return { text: "Due today", cls: "soon" };
-	if (days === 1) return { text: "Due tomorrow", cls: "soon" };
-	if (days <= 3) return { text: `Due in ${days} days`, cls: "soon" };
-	return { text: `Due in ${days} days`, cls: "" };
 }
 
-function fmtDate(dateStr) {
-	if (!dateStr) return null;
-	return new Date(dateStr + "T00:00:00").toLocaleDateString("en-US", {
-		month: "short",
-		day: "numeric",
-		year: "numeric",
-	});
-}
+/* ============================================================
+   RENDER ENGINE
+   ============================================================ */
 
-function priorityCls(p) {
-	return p === "High" ? "p-high" : p === "Low" ? "p-low" : "p-medium";
-}
+function buildTaskCardHTML(task) {
+	const isEditing = currentlyEditingTaskId === task.id;
+	const timeInfo = getTimeRemainingInfo(task.due, task.done);
+	const isLong = task.desc.length > DESCRIPTION_COLLAPSE_THRESHOLD;
+	const priorityClass = `priority-bar--${task.priority.toLowerCase()}`;
 
-function statusCls(s) {
-	return s === "Done"
-		? "s-done"
-		: s === "In Progress"
-			? "s-progress"
-			: "s-pending";
-}
-
-function escHtml(s) {
-	return String(s)
-		.replace(/&/g, "&amp;")
-		.replace(/</g, "&lt;")
-		.replace(/>/g, "&gt;")
-		.replace(/"/g, "&quot;");
-}
-
-function renderTasks() {
-	const list = document.getElementById("task-list");
-	const badge = document.getElementById("count-badge");
-	const total = tasks.length;
-	badge.textContent = `${total} task${total !== 1 ? "s" : ""}`;
-
-	if (!total) {
-		list.innerHTML =
-			'<div class="empty" role="status">No tasks yet — add one above</div>';
-		return;
+	if (isEditing) {
+		return `
+        <article class="task-card" data-testid="test-todo-card">
+            <div class="card-layout">
+                <div class="priority-bar ${priorityClass}" data-testid="test-todo-priority-indicator"></div>
+                <div class="card-body" data-testid="test-todo-edit-form">
+                    <div class="edit-form-field">
+                        <label for="edit-input-title-${task.id}">Title</label>
+                        <input id="edit-input-title-${task.id}" data-testid="test-todo-edit-title-input" type="text" value="${task.title}">
+                    </div>
+                    <div class="edit-form-field">
+                        <label for="edit-input-description-${task.id}">Description</label>
+                        <textarea id="edit-input-description-${task.id}" data-testid="test-todo-edit-description-input">${task.desc}</textarea>
+                    </div>
+                    <div class="edit-form-row">
+                        <div class="edit-form-field">
+                            <label for="edit-input-priority-${task.id}">Priority</label>
+                            <select id="edit-input-priority-${task.id}" data-testid="test-todo-edit-priority-select">
+                                <option value="Low" ${task.priority === "Low" ? "selected" : ""}>Low</option>
+                                <option value="Medium" ${task.priority === "Medium" ? "selected" : ""}>Medium</option>
+                                <option value="High" ${task.priority === "High" ? "selected" : ""}>High</option>
+                            </select>
+                        </div>
+                        <div class="edit-form-field">
+                            <label for="edit-input-due-date-${task.id}">Due Date</label>
+                            <input id="edit-input-due-date-${task.id}" data-testid="test-todo-edit-due-date-input" type="date" value="${task.due || ""}">
+                        </div>
+                    </div>
+                    <div class="edit-form-actions">
+                        <button class="button" data-testid="test-todo-cancel-button" onclick="cancelTaskEdit()">Cancel</button>
+                        <button class="button button--primary" data-testid="test-todo-save-button" onclick="saveTaskEdits(${task.id})">Save Changes</button>
+                    </div>
+                </div>
+            </div>
+        </article>`;
 	}
 
-	list.innerHTML = tasks
-		.map((t) => {
-			const tr = friendlyTime(t.due);
-			const dueFmt = fmtDate(t.due);
+	return `
+    <article class="task-card ${task.done ? "task-card--completed" : ""}" data-testid="test-todo-card">
+        <div class="card-layout">
+            <div class="priority-bar ${priorityClass}" data-testid="test-todo-priority-indicator"></div>
+            <div class="card-body">
+                <div class="card-header">
+                    <input type="checkbox" data-testid="test-todo-complete-toggle" aria-label="Toggle Complete" ${task.done ? "checked" : ""} onchange="toggleTaskCompletion(${task.id}, this.checked)">
+                    <div>
+                        <h2 class="task-title ${task.done ? "task-title--completed" : ""}" data-testid="test-todo-title">${task.title}</h2>
+                        <span class="priority-badge priority-badge--${task.priority.toLowerCase()}" data-testid="test-todo-priority-badge">${task.priority}</span>
+                    </div>
+                    <div class="card-actions">
+                        <button class="icon-button" data-testid="test-todo-edit-button" onclick="openEditForm(${task.id})" aria-label="Edit task">
+                            <svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
+                        </button>
+                        <button class="icon-button icon-button--danger" data-testid="test-todo-delete-button" onclick="deleteTask(${task.id})" aria-label="Delete task">
+                            <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></svg>
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="status-row">
+                    <label class="status-label" for="status-ctrl-${task.id}">Status</label>
+                    <select id="status-ctrl-${task.id}" class="status-select" data-testid="test-todo-status-control" onchange="updateTaskStatus(${task.id}, this.value)">
+                        <option value="Pending" ${task.status === "Pending" ? "selected" : ""}>Pending</option>
+                        <option value="In Progress" ${task.status === "In Progress" ? "selected" : ""}>In Progress</option>
+                        <option value="Done" ${task.status === "Done" ? "selected" : ""}>Done</option>
+                    </select>
+                </div>
 
-			const tagsHtml = t.tags.length
-				? `<div class="tags-row" data-testid="test-todo-tags" role="list" aria-label="Tags">${t.tags
-						.map(
-							(tag) =>
-								`<span class="tag" data-testid="test-todo-tag-${escHtml(tag.toLowerCase())}" role="listitem">${escHtml(tag)}</span>`,
-						)
-						.join("")}</div>`
-				: `<div data-testid="test-todo-tags" style="display:none"></div>`;
+                <div class="description-area">
+                    <div id="collapsible-${task.id}" class="${isLong && !task.expanded ? "description-text--clamped" : ""}" data-testid="test-todo-collapsible-section">
+                        <p class="description-text" data-testid="test-todo-description">${task.desc}</p>
+                    </div>
+                    ${
+											isLong
+												? `
+                        <button class="expand-button" data-testid="test-todo-expand-toggle" aria-expanded="${task.expanded}" aria-controls="collapsible-${task.id}" onclick="toggleDescriptionExpanded(${task.id})">
+                            ${task.expanded ? "Show Less" : "Show More"}
+                        </button>`
+												: ""
+										}
+                </div>
 
-			const dateHtml = dueFmt
-				? `<span class="meta">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-            <time data-testid="test-todo-due-date" datetime="${escHtml(t.due)}">Due ${escHtml(dueFmt)}</time>
-          </span>`
-				: "";
-
-			const timeHtml = tr
-				? `<span class="meta ${tr.cls}" aria-live="polite">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-            <time data-testid="test-todo-time-remaining" aria-label="${escHtml(tr.text)}">${escHtml(tr.text)}</time>
-          </span>`
-				: `<time data-testid="test-todo-time-remaining" style="display:none"></time>`;
-
-			return `
-        <article
-          class="todo-card${t.done ? " is-done" : ""}"
-          data-testid="test-todo-card"
-          role="listitem"
-          aria-label="Task: ${escHtml(t.title)}"
-        >
-          <div class="card-header">
-            <div class="cb-wrap">
-              <label for="cb-${t.id}" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)">
-                Mark "${escHtml(t.title)}" as complete
-              </label>
-              <input
-                type="checkbox"
-                id="cb-${t.id}"
-                data-testid="test-todo-complete-toggle"
-                ${t.done ? "checked" : ""}
-                aria-label="Mark task as complete"
-                onchange="toggleDone(${t.id})"
-              />
+                <div class="meta-row">
+                    <div class="meta-item ${timeInfo?.cssClass || ""}" aria-live="polite">
+                        <span data-testid="test-todo-time-remaining">${timeInfo?.text || "No deadline"}</span>
+                    </div>
+                    ${timeInfo?.isOverdue ? `<span class="overdue-badge" data-testid="test-todo-overdue-indicator">Overdue</span>` : '<span data-testid="test-todo-overdue-indicator" style="display:none"></span>'}
+                </div>
             </div>
-
-            <div class="title-block">
-              <h2 class="todo-title${t.done ? " done" : ""}" data-testid="test-todo-title">
-                ${escHtml(t.title)}
-              </h2>
-              <div class="badge-row">
-                <span
-                  class="badge ${priorityCls(t.priority)}"
-                  data-testid="test-todo-priority"
-                  role="status"
-                  aria-label="Priority: ${escHtml(t.priority)}"
-                >${escHtml(t.priority)}</span>
-                <span
-                  class="badge ${statusCls(t.status)}"
-                  data-testid="test-todo-status"
-                  role="status"
-                  aria-label="Status: ${escHtml(t.status)}"
-                >${escHtml(t.status)}</span>
-              </div>
-            </div>
-
-            <div class="action-btns">
-              <button
-                class="icon-btn"
-                data-testid="test-todo-edit-button"
-                aria-label="Edit task"
-                onclick="console.log('edit clicked', ${t.id})"
-                tabindex="0"
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4z"/>
-                </svg>
-              </button>
-              <button
-                class="icon-btn del"
-                data-testid="test-todo-delete-button"
-                aria-label="Delete task"
-                onclick="deleteTask(${t.id})"
-                tabindex="0"
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <polyline points="3 6 5 6 21 6"/>
-                  <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
-                  <path d="M10 11v6"/><path d="M14 11v6"/>
-                  <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
-                </svg>
-              </button>
-            </div>
-          </div>
-
-          <p class="todo-desc" data-testid="test-todo-description" ${!t.desc ? 'style="display:none"' : ""}>
-            ${escHtml(t.desc)}
-          </p>
-
-          ${
-						dateHtml || timeHtml
-							? `<div class="meta-row">${dateHtml}${timeHtml}</div>`
-							: ""
-					}
-
-          ${tagsHtml}
-        </article>
-      `;
-		})
-		.join("");
+        </div>
+    </article>`;
 }
 
-renderTasks();
-setInterval(renderTasks, 60000);
+function toggleDescriptionExpanded(taskId) {
+	const task = tasks.find((t) => t.id === taskId);
+	if (task) {
+		task.expanded = !task.expanded;
+		renderTaskList();
+	}
+}
+
+function renderTaskList() {
+	const list = document.getElementById("task-list");
+
+	// Filter tasks based on current filter
+	let filteredTasks = tasks;
+	if (currentFilter === "active") {
+		filteredTasks = tasks.filter((t) => !t.done);
+	} else if (currentFilter === "done") {
+		filteredTasks = tasks.filter((t) => t.done);
+	} else if (currentFilter === "overdue") {
+		filteredTasks = tasks.filter((t) => {
+			if (t.done) return false;
+			if (!t.due) return false;
+			const dueDate = new Date(t.due + "T23:59:00");
+			return dueDate < Date.now();
+		});
+	}
+
+	// Update statistics
+	const totalCount = tasks.length;
+	const overdueCount = tasks.filter((t) => {
+		if (t.done) return false;
+		if (!t.due) return false;
+		const dueDate = new Date(t.due + "T23:59:00");
+		return dueDate < Date.now();
+	}).length;
+	const doneCount = tasks.filter((t) => t.done).length;
+
+	document.getElementById("stat-total").textContent =
+		`${totalCount} ${totalCount === 1 ? "task" : "tasks"}`;
+	const overdueBadge = document.getElementById("stat-overdue");
+	const doneBadge = document.getElementById("stat-done");
+
+	if (overdueCount > 0) {
+		overdueBadge.textContent = `${overdueCount} ${overdueCount === 1 ? "overdue" : "overdue"}`;
+		overdueBadge.hidden = false;
+	} else {
+		overdueBadge.hidden = true;
+	}
+
+	if (doneCount > 0) {
+		doneBadge.textContent = `${doneCount} ${doneCount === 1 ? "done" : "done"}`;
+		doneBadge.hidden = false;
+	} else {
+		doneBadge.hidden = true;
+	}
+
+	// Render filtered tasks or empty state
+	if (filteredTasks.length === 0) {
+		list.innerHTML = `<div class="empty-state">No tasks to display</div>`;
+	} else {
+		list.innerHTML = filteredTasks.map(buildTaskCardHTML).join("");
+	}
+}
+
+// Boot
+renderTaskList();
+setInterval(renderTaskList, TIME_REFRESH_INTERVAL_MS);
