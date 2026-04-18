@@ -3,7 +3,6 @@
 const DESCRIPTION_COLLAPSE_THRESHOLD = 120;
 const TIME_REFRESH_INTERVAL_MS = 30000;
 
-// Seed data for the single card requirement
 let tasks = [
 	{
 		id: 1,
@@ -21,13 +20,8 @@ let tasks = [
 let currentlyEditingTaskId = null;
 let currentFilter = "all";
 
-/* ============================================================
-   STATUS & LOGIC RULES
-   ============================================================ */
-
 function setActiveFilter(filter, element) {
 	currentFilter = filter;
-	// Update active button state
 	document.querySelectorAll(".filter-button").forEach((btn) => {
 		btn.classList.remove("filter-button--active");
 	});
@@ -39,8 +33,6 @@ function toggleTaskCompletion(taskId, isChecked) {
 	const task = tasks.find((t) => t.id === taskId);
 	if (!task) return;
 	task.done = isChecked;
-	// RULE: If checkbox toggled -> status becomes "Done"
-	// RULE: If unchecked after "Done" -> revert to "Pending"
 	task.status = isChecked ? "Done" : "Pending";
 	renderTaskList();
 }
@@ -49,14 +41,9 @@ function updateTaskStatus(taskId, newStatus) {
 	const task = tasks.find((t) => t.id === taskId);
 	if (!task) return;
 	task.status = newStatus;
-	// RULE: If status manually set to "Done" -> checkbox becomes checked
 	task.done = newStatus === "Done";
 	renderTaskList();
 }
-
-/* ============================================================
-   EDIT MODE & FOCUS TRAP
-   ============================================================ */
 
 function openEditForm(taskId) {
 	currentlyEditingTaskId = taskId;
@@ -99,7 +86,6 @@ function cancelTaskEdit() {
 	renderTaskList();
 }
 
-// Focus Trap and Escape Key Handler
 document.addEventListener("keydown", (e) => {
 	if (currentlyEditingTaskId === null) return;
 
@@ -120,10 +106,6 @@ document.addEventListener("keydown", (e) => {
 		}
 	}
 });
-
-/* ============================================================
-   TIME CALCULATIONS
-   ============================================================ */
 
 function getTimeRemainingInfo(isoDateString, isTaskDone) {
 	if (isTaskDone)
@@ -164,10 +146,6 @@ function getTimeRemainingInfo(isoDateString, isTaskDone) {
 		};
 	}
 }
-
-/* ============================================================
-   RENDER ENGINE
-   ============================================================ */
 
 function buildTaskCardHTML(task) {
 	const isEditing = currentlyEditingTaskId === task.id;
@@ -278,7 +256,6 @@ function toggleDescriptionExpanded(taskId) {
 function renderTaskList() {
 	const list = document.getElementById("task-list");
 
-	// Filter tasks based on current filter
 	let filteredTasks = tasks;
 	if (currentFilter === "active") {
 		filteredTasks = tasks.filter((t) => !t.done);
@@ -293,7 +270,6 @@ function renderTaskList() {
 		});
 	}
 
-	// Update statistics
 	const totalCount = tasks.length;
 	const overdueCount = tasks.filter((t) => {
 		if (t.done) return false;
@@ -322,7 +298,6 @@ function renderTaskList() {
 		doneBadge.hidden = true;
 	}
 
-	// Render filtered tasks or empty state
 	if (filteredTasks.length === 0) {
 		list.innerHTML = `<div class="empty-state">No tasks to display</div>`;
 	} else {
@@ -330,6 +305,5 @@ function renderTaskList() {
 	}
 }
 
-// Boot
 renderTaskList();
 setInterval(renderTaskList, TIME_REFRESH_INTERVAL_MS);
